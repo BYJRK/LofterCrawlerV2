@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Dict, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 from multiprocessing import pool
 from pathlib import Path
 import json
@@ -17,6 +17,10 @@ HEADERS = {
 }
 TIMEOUT = 16
 PROCESSES = 8
+MAX_RETRY = 2
+REPLACE = True
+DATE_DELTA = timedelta(days=40732)
+ILLEGAL_PATH_CHARS = r'\/:*?"<>|'
 
 
 def get_html(url: str) -> str:
@@ -39,11 +43,12 @@ def get_filename(url: str) -> str:
     # 图片的名称形如：
     # zJtTDg2RGdJREZ3PT0.jpg
     # 5982469947077.jpg
+    # http://imglf2.ph.126.net/As9QcYbKzXKCnJdVWMe7FA==/6630839067281310791.jpg
     # http://xxx/xxx.jpg?imageView&amp;thumbnail=1680x0&amp;quality=96&amp;stripmeta=0&amp;type=jpg
-    return re.search(r'(?<=img/)\w+\.\w+', url).group()
+    return re.search(r'(?<!/)/(\w+\.\w+)', url).group(1)
 
 
-def download_image(url, file, maxsize=None, replace=False):
+def download_image(url, file, maxsize=None, replace=True):
     """
     从给定的链接下载图片到指定的位置
 
@@ -62,7 +67,7 @@ def download_image(url, file, maxsize=None, replace=False):
         file = Path(file)
     # 如果不替换，而且已有同名文件，则直接跳过
     if not replace and file.exists():
-        return (True, file)
+        return None
     if maxsize:
         assert isinstance(maxsize, int) and maxsize > 0, 'maxsize 参数有误'
         url = re.sub(r'(?<=thumbnail=)\d+(?=x)', str(maxsize), url)
@@ -71,17 +76,20 @@ def download_image(url, file, maxsize=None, replace=False):
         with file.open('wb') as f:
             for chunk in img:
                 f.write(chunk)
-        return (True, file)
+        return None
     else:
         print(f'下载超时：{url}')
         if file.exists():
             file.unlink()
-        return (False, url)
+        return url, file
 
 
-def download_post_mt(post, processes=8, pbar=False, maxsize=None):
+def download_post_mt(post, maxsize=None):
+    """
+    多线程地下载一个贴子中的所有图片（仅测试用）
+    """
     print(f"开始下载贴子 {post['url']} 中的图片")
-    myPool = pool.Pool(processes=processes)
+    myPool = pool.Pool(processes=PROCESSES)
     folder = Path(post['title'])
     folder.mkdir(exist_ok=True)
     pbar = tqdm(total=len(post['images']), ascii=True)
@@ -100,6 +108,36 @@ def download_post_mt(post, processes=8, pbar=False, maxsize=None):
     pbar.close()
 
 
+def download_images_mt(images, maxsize=None, retry=0):
+    print(f"开始下载图片")
+
+    pbar = tqdm(total=len(images), ascii=True)
+    mypool = pool.Pool(processes=PROCESSES)
+    result = []
+
+    def update(res):
+        if res:
+            result.append(res)
+        pbar.update()
+
+    start_time = time.time()
+    for link, path in images:
+        mypool.apply_async(download_image, args=(
+            link, path, maxsize, REPLACE), callback=update)
+    mypool.close()
+    mypool.join()
+    pbar.close()
+    stop_time = time.time()
+    print(f'下载完毕，耗时 {stop_time-start_time:.4f} 秒')
+    if result:
+        print(f'其中 {len(result)} 张图片下载失败', end='')
+        if retry < MAX_RETRY:
+            print('，尝试重新下载')
+            download_images_mt(result, maxsize, retry + 1)
+        else:
+            print()
+
+
 def get_image_links_in_post(soup) -> List[str]:
     """
     获取指定贴子下的所有图片的原图链接
@@ -113,41 +151,47 @@ def get_image_links_in_post(soup) -> List[str]:
 def get_domain_title(domain: str) -> str:
     """
     获取域名的标题
-
-    Args:
-        domain: 域名，形如 yurisa123
-
-    Returns:
-        str: 域名的标题
     """
     try:
         html = get_html(get_page_url(domain, 1))
         soup = BeautifulSoup(html, 'lxml')
         title = re.split(r'\s+', soup.head.title.string)[0].strip()
-        return soup.head.title.string
+        return title
     except:
         # 如果无法获取标题，则返回域名
         return domain
 
 
 def get_post_info(url: str) -> Dict[str, str]:
+    """
+    从贴子链接获取贴子的所有信息，包含图片列表，返回一个字典
+    """
     html = get_html(url)
     if not html:
         return None
     soup = BeautifulSoup(html, 'lxml')
-    title = soup.head.title.text
+    # 贴子的标题
+    title = re.sub(r'\s+', ' ', soup.head.title.text).strip()
+    # 贴子中的文字内容（可能包含模特信息等）
     content = soup.find('div', class_='content')
     if content:
         text = content.find('div', class_='text')
     else:
         text = soup.find('div', class_='text')
     text = text.text if text else None
+    # 贴子发布的日期（不准，可能会差几天）
     # date = re.search(r'\d{4}-\d{2}-\d{2}', html)
-    # date = datetime.strptime(date.group(), '%Y-%m-%d') if date else None
-    info = soup.find('div', class_='info')
+    # if date:
+    #     date = datetime.strptime(date.group(), '%Y-%m-%d')
+    # else:
+    date = datetime.fromtimestamp(
+        int(url.split('_')[-1], base=16)) - DATE_DELTA
+    date = date.strftime('%Y-%m-%d')
+
     return {
-        'title': re.sub(r'\s', ' ', soup.head.title.text),
+        'title': title,
         'url': url,
+        'date': date,
         'text': text,
         'images': [link for link in get_image_links_in_post(soup)]
     }
@@ -256,10 +300,19 @@ def get_end_page_number(domain, start_page=1, end_page=0):
                 return left
 
 
-def gather_image_links(domain, start_page=1, end_page=0):
+def gather_post_infos(domain, start_page=1, end_page=0):
+    """
+    爬取博客指定页数范围内的所有贴子信息（包含图片链接）
+    """
     username = get_domain_title(domain)
     end_page = get_end_page_number(domain, start_page, end_page)
-    print(f'开始爬取博客「{username}」 {start_page} 至 {end_page} 页的所有贴子')
+    json_file = Path(f'{username}_{start_page}_{end_page}.json')
+    if json_file.exists():
+        print(f'找到已有文件：{json_file.name}')
+        with json_file.open('r', encoding='utf-8') as f:
+            domain_info = json.load(f)
+            return domain_info
+    print(f'开始爬取博客「{username}」{start_page} 至 {end_page} 页的所有贴子')
 
     mypool = pool.Pool(processes=PROCESSES)
     # 获取每一页的网址
@@ -286,15 +339,49 @@ def gather_image_links(domain, start_page=1, end_page=0):
 
     domain_info = {
         'domain': f'http://{domain}.lofter.com/',
+        'username': username,
         'page_range': [start_page, end_page],
         'posts': post_infos
     }
 
-    json_file = Path(f'{username}_{start_page}_{end_page}.json')
     with json_file.open('w', encoding='utf-8') as f:
         json.dump(domain_info, f)
-        print('.json 文件保存完毕。')
+        print(f'{json_file.name} 文件保存完毕。')
+    return domain_info
+
+
+def gather_image_links(info, separate_folders=True):
+    """
+    汇总所有图片的链接以及对应的存放位置，并提前创建需要的文件夹
+    """
+    if isinstance(info, str):
+        with open(info, 'r', encoding='utf-8') as f:
+            info = json.load(f)
+
+    # 创建域名文件夹
+    domain_dir = Path(info['username'])
+    domain_dir.mkdir(exist_ok=True)
+    image_links = []
+    for post in info['posts']:
+        # 说明这个贴子下没有图片，直接跳过
+        if not post['images']:
+            continue
+        # 贴子下有图片
+        if separate_folders:
+            title = post['title']
+            for c in ILLEGAL_PATH_CHARS:
+                title = title.replace(c, '')
+            post_dir = domain_dir / Path(title)
+            post_dir.mkdir(exist_ok=True)
+            for image in post['images']:
+                image_links.append((image, post_dir / get_filename(image)))
+        else:
+            for image in post['images']:
+                image_links.append((image, domain_dir / get_filename(image)))
+    return image_links
 
 
 if __name__ == "__main__":
-    gather_image_links('hiroron')
+    domain_info = gather_post_infos('gx-bhmt')
+    image_list = gather_image_links(domain_info, separate_folders=False)
+    download_images_mt(image_list, maxsize=6000)
