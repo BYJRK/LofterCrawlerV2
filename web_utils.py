@@ -11,9 +11,10 @@ from tqdm import tqdm
 
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) '
                   'AppleWebKit/537.36 (KHTML, like Gecko) '
-                  'Chrome/68.0.3440.106 Safari/537.36 '
+                  'Chrome/73.0.3683.103 '
+                  'Safari/537.36'
 }
 TIMEOUT = 16
 PROCESSES = 8
@@ -108,10 +109,10 @@ def download_post_mt(post, maxsize=None):
     pbar.close()
 
 
-def download_images_mt(images, maxsize=None, retry=0):
+def download_images_mt(image_links, maxsize=None, retry=0):
     print(f"开始下载图片")
 
-    pbar = tqdm(total=len(images), ascii=True)
+    pbar = tqdm(total=len(image_links), ascii=True)
     mypool = pool.Pool(processes=PROCESSES)
     result = []
 
@@ -121,7 +122,7 @@ def download_images_mt(images, maxsize=None, retry=0):
         pbar.update()
 
     start_time = time.time()
-    for link, path in images:
+    for link, path in image_links:
         mypool.apply_async(download_image, args=(
             link, path, maxsize, REPLACE), callback=update)
     mypool.close()
@@ -358,26 +359,41 @@ def gather_image_links(info, separate_folders=True):
         with open(info, 'r', encoding='utf-8') as f:
             info = json.load(f)
 
-    # 创建域名文件夹
-    domain_dir = Path(info['username'])
-    domain_dir.mkdir(exist_ok=True)
     image_links = []
-    for post in info['posts']:
-        # 说明这个贴子下没有图片，直接跳过
-        if not post['images']:
-            continue
-        # 贴子下有图片
-        if separate_folders:
-            title = post['title']
-            for c in ILLEGAL_PATH_CHARS:
-                title = title.replace(c, '')
-            post_dir = domain_dir / Path(title)
-            post_dir.mkdir(exist_ok=True)
-            for image in post['images']:
-                image_links.append((image, post_dir / get_filename(image)))
-        else:
-            for image in post['images']:
-                image_links.append((image, domain_dir / get_filename(image)))
+    # 表明这是一个 domain info
+    if 'posts' in info:
+        # 创建域名文件夹
+        domain_dir = Path(info['username'])
+        domain_dir.mkdir(exist_ok=True)
+        for post in info['posts']:
+            # 说明这个贴子下没有图片，直接跳过
+            if not post['images']:
+                continue
+            # 贴子下有图片
+            if separate_folders:
+                title = post['title']
+                for c in ILLEGAL_PATH_CHARS:
+                    title = title.replace(c, '')
+                post_dir = domain_dir / Path(title)
+                post_dir.mkdir(exist_ok=True)
+                for image in post['images']:
+                    image_links.append((image, post_dir / get_filename(image)))
+            else:
+                for image in post['images']:
+                    image_links.append(
+                        (image, domain_dir / get_filename(image)))
+    # 否则表明这是一个 post info
+    else:
+        if not info['images']:
+            return []
+        title = info['title']
+        for c in ILLEGAL_PATH_CHARS:
+            title = title.replace(c, '')
+        post_dir = Path(title)
+        post_dir.mkdir(exist_ok=True)
+        for image in info['images']:
+            image_links.append((image, post_dir / get_filename(image)))
+
     return image_links
 
 
