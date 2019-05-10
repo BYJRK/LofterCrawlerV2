@@ -19,9 +19,11 @@ HEADERS = {
 TIMEOUT = 16
 PROCESSES = 8
 MAX_RETRY = 2
+MAX_SIZE = None
 REPLACE = True
 DATE_DELTA = timedelta(days=40732)
 ILLEGAL_PATH_CHARS = r'\/:*?"<>|'
+CHUNK_SIZE = 1024
 
 
 def get_html(url: str) -> str:
@@ -49,7 +51,7 @@ def get_filename(url: str) -> str:
     return re.search(r'(?<!/)/(\w+\.\w+)', url).group(1)
 
 
-def download_image(url, file, maxsize=None, replace=True):
+def download_image(url, file, replace=True):
     """
     从给定的链接下载图片到指定的位置
 
@@ -57,7 +59,6 @@ def download_image(url, file, maxsize=None, replace=True):
         url: 图片链接
         file: 存放路径
         replace: 是否覆盖已有同名文件（默认为 False）
-        maxsize: 是否限制图片最大尺寸
 
     Returns:
         下载的状态：
@@ -69,13 +70,13 @@ def download_image(url, file, maxsize=None, replace=True):
     # 如果不替换，而且已有同名文件，则直接跳过
     if not replace and file.exists():
         return None
-    if maxsize:
-        assert isinstance(maxsize, int) and maxsize > 0, 'maxsize 参数有误'
-        url = re.sub(r'(?<=thumbnail=)\d+(?=x)', str(maxsize), url)
+    if MAX_SIZE:
+        assert isinstance(MAX_SIZE, int) and MAX_SIZE > 0, 'maxsize 参数有误'
+        url = re.sub(r'(?<=thumbnail=)\d+(?=x)', str(MAX_SIZE), url)
     img = requests.get(url, stream=True, timeout=TIMEOUT)
     if img.status_code == 200:
         with file.open('wb') as f:
-            for chunk in img:
+            for chunk in img.iter_content(CHUNK_SIZE):
                 f.write(chunk)
         return None
     else:
@@ -85,31 +86,7 @@ def download_image(url, file, maxsize=None, replace=True):
         return url, file
 
 
-def download_post_mt(post, maxsize=None):
-    """
-    多线程地下载一个贴子中的所有图片（仅测试用）
-    """
-    print(f"开始下载贴子 {post['url']} 中的图片")
-    myPool = pool.Pool(processes=PROCESSES)
-    folder = Path(post['title'])
-    folder.mkdir(exist_ok=True)
-    pbar = tqdm(total=len(post['images']), ascii=True)
-
-    def update(*p):
-        # TODO: 考虑下载失败的情况
-        pbar.update()
-
-    for link in post['images']:
-        filename = folder / get_filename(link)
-        myPool.apply_async(download_image, args=(
-            link, filename, maxsize), callback=update)
-
-    myPool.close()
-    myPool.join()
-    pbar.close()
-
-
-def download_images_mt(image_links, maxsize=None, retry=0):
+def download_images_mt(image_links, retry=0):
     print(f"开始下载图片")
 
     pbar = tqdm(total=len(image_links), ascii=True)
@@ -124,19 +101,21 @@ def download_images_mt(image_links, maxsize=None, retry=0):
     start_time = time.time()
     for link, path in image_links:
         mypool.apply_async(download_image, args=(
-            link, path, maxsize, REPLACE), callback=update)
+            link, path, REPLACE), callback=update)
     mypool.close()
     mypool.join()
     pbar.close()
     stop_time = time.time()
     print(f'下载完毕，耗时 {stop_time-start_time:.4f} 秒')
-    if result:
+    if len(result):
         print(f'其中 {len(result)} 张图片下载失败', end='')
         if retry < MAX_RETRY:
             print('，尝试重新下载')
-            download_images_mt(result, maxsize, retry + 1)
+            download_images_mt(result, MAX_SIZE, retry + 1)
         else:
-            print()
+            print('，链接如下：')
+            for link, _ in result:
+                print(link)
 
 
 def get_image_links_in_post(soup) -> List[str]:
@@ -395,9 +374,3 @@ def gather_image_links(info, separate_folders=True):
             image_links.append((image, post_dir / get_filename(image)))
 
     return image_links
-
-
-if __name__ == "__main__":
-    domain_info = gather_post_infos('gx-bhmt')
-    image_list = gather_image_links(domain_info, separate_folders=False)
-    download_images_mt(image_list, maxsize=6000)

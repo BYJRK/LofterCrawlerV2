@@ -14,6 +14,8 @@ parser.add_argument('--maxsize', type=int, help='最大图片尺寸')
 parser.add_argument('--separate', action='store_true', help='是否按贴子分文件夹进行存储')
 parser.add_argument('--processes', type=int, default=8, help='进程数（默认 8）')
 parser.add_argument('--timeout', type=int, default=16, help='超时时间（默认 16 秒）')
+parser.add_argument('--chunksize', type=int,
+                    default=1024, help='数据块大小（默认 1024KB）')
 
 args = parser.parse_args()
 
@@ -38,7 +40,7 @@ def main():
         domain = domain.group(1)
         post_infos = gather_post_infos(domain, args.start_page, args.end_page)
         image_links = gather_image_links(post_infos, args.separate)
-        download_images_mt(image_links, args.maxsize)
+        download_images_mt(image_links)
 
 
 if __name__ == "__main__":
@@ -50,4 +52,6 @@ if __name__ == "__main__":
     web_utils.PROCESSES = args.processes
     web_utils.TIMEOUT = args.timeout
     web_utils.MAX_RETRY = args.retry
+    web_utils.CHUNK_SIZE = args.chunksize
+    web_utils.MAX_SIZE = args.maxsize
     main()
