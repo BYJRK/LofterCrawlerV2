@@ -6,6 +6,7 @@ usage: loftercrawler.py [-h] [--start_page START_PAGE] [--end_page END_PAGE]
                         [--replace REPLACE] [--retry RETRY]
                         [--maxsize MAXSIZE] [--separate]
                         [--processes PROCESSES] [--timeout TIMEOUT]
+                        [--chunksize CHUNKSIZE]
                         target
 
 一个多线程 Lofter 爬虫
@@ -25,4 +26,6 @@ optional arguments:
   --processes PROCESSES
                         进程数（默认 8）
   --timeout TIMEOUT     超时时间（默认 16 秒）
+  --chunksize CHUNKSIZE
+                        数据块大小（默认 1024KB）
   ```
