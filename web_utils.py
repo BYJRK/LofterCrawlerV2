@@ -111,7 +111,7 @@ def download_images_mt(image_links, retry=0):
         print(f'其中 {len(result)} 张图片下载失败', end='')
         if retry < MAX_RETRY:
             print('，尝试重新下载')
-            download_images_mt(result, MAX_SIZE, retry + 1)
+            download_images_mt(result, retry + 1)
         else:
             print('，链接如下：')
             for link, _ in result:
