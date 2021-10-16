@@ -22,12 +22,12 @@ args = parser.parse_args()
 
 def main():
     # target 可能是：
-    # http://yurisa123.lofter.com/post/1cf5f941_12e0d2793
-    # http://yurisa123.lofter.com/
+    # https://yurisa123.lofter.com/post/1cf5f941_12e0d2793
+    # https://yurisa123.lofter.com/
     # yurisa123.lofter.com
     # yurisa123
-    re_domain = re.compile(r'(?:http://)?([a-zA-Z0-9-]+)(?:\.\w+\.com.*)?')
-    re_post = re.compile(r'http://[a-zA-Z0-9-]+\.lofter\.com/post/\w+_\w+')
+    re_domain = re.compile(r'(?:https://)?([a-zA-Z0-9-]+)(?:\.\w+\.com.*)?')
+    re_post = re.compile(r'https://[a-zA-Z0-9-]+\.lofter\.com/post/\w+_\w+')
     post = re_post.search(args.target)
     if post:
         post = post.group()

@@ -11,10 +11,7 @@ from tqdm import tqdm
 
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) '
-                  'AppleWebKit/537.36 (KHTML, like Gecko) '
-                  'Chrome/73.0.3683.103 '
-                  'Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36 Edg/94.0.992.50'
 }
 TIMEOUT = 16
 PROCESSES = 8
@@ -100,8 +97,7 @@ def download_images_mt(image_links, retry=0):
 
     start_time = time.time()
     for link, path in image_links:
-        mypool.apply_async(download_image, args=(
-            link, path, REPLACE), callback=update)
+        mypool.apply_async(download_image, args=(link, path, REPLACE), callback=update)
     mypool.close()
     mypool.join()
     pbar.close()
@@ -134,7 +130,7 @@ def get_domain_title(domain: str) -> str:
     """
     try:
         html = get_html(get_page_url(domain, 1))
-        soup = BeautifulSoup(html, 'lxml')
+        soup = BeautifulSoup(html, 'html.parser')
         title = re.split(r'\s+', soup.head.title.string)[0].strip()
         return title
     except:
@@ -149,7 +145,7 @@ def get_post_info(url: str) -> Dict[str, str]:
     html = get_html(url)
     if not html:
         return None
-    soup = BeautifulSoup(html, 'lxml')
+    soup = BeautifulSoup(html, 'html.parser')
     # 贴子的标题
     title = re.sub(r'\s+', ' ', soup.head.title.text).strip()
     # 贴子中的文字内容（可能包含模特信息等）
@@ -164,8 +160,7 @@ def get_post_info(url: str) -> Dict[str, str]:
     # if date:
     #     date = datetime.strptime(date.group(), '%Y-%m-%d')
     # else:
-    date = datetime.fromtimestamp(
-        int(url.split('_')[-1], base=16)) - DATE_DELTA
+    date = datetime.fromtimestamp(int(url.split('_')[-1], base=16)) - DATE_DELTA
     date = date.strftime('%Y-%m-%d')
 
     return {
@@ -173,7 +168,7 @@ def get_post_info(url: str) -> Dict[str, str]:
         'url': url,
         'date': date,
         'text': text,
-        'images': [link for link in get_image_links_in_post(soup)]
+        'images': [link for link in get_image_links_in_post(soup)],
     }
 
 
@@ -183,12 +178,12 @@ def get_post_links_in_page(url: str) -> List[str]:
     """
     # 推文链接形如 xxx.lofter.com/post/123abcd_12496ef13
     # 前面必须加博客的域名，因为推主可能会转发别人的
-    pattern = url[:url.index('.com/') + 5] + r'post/[0-9a-f]+_[0-9a-f]+'
+    pattern = url[: url.index('.com/') + 5] + r'post/[0-9a-f]+_[0-9a-f]+'
     links = []
     html = get_html(url)
     if not html:
         return []
-    soup = BeautifulSoup(html, 'lxml')
+    soup = BeautifulSoup(html, 'html.parser')
     posts = soup.find_all('a', href=re.compile(pattern))
     for post in posts:
         href = post.get('href')
@@ -219,8 +214,8 @@ def get_page_url(domain: str, page_number: int) -> str:
     assert type(page_number) is int and page_number >= 1, '输入的页数有误'
     # 虽然 ?page=1 也是可以正确获取首页内容的，但最好还是不这样写
     if page_number == 1:
-        return f'http://{domain}.lofter.com/'
-    return f'http://{domain}.lofter.com/?page={page_number}'
+        return f'https://{domain}.lofter.com/'
+    return f'https://{domain}.lofter.com/?page={page_number}'
 
 
 def get_post_title(url: str) -> str:
@@ -297,8 +292,7 @@ def gather_post_infos(domain, start_page=1, end_page=0):
     mypool = pool.Pool(processes=PROCESSES)
     # 获取每一页的网址
     start_time = time.time()
-    page_links = [get_page_url(domain, i)
-                  for i in range(start_page, end_page + 1)]
+    page_links = [get_page_url(domain, i) for i in range(start_page, end_page + 1)]
     post_links_in_pages = mypool.map(get_post_links_in_page, page_links)
     post_links = []
     for links in post_links_in_pages:
@@ -318,10 +312,10 @@ def gather_post_infos(domain, start_page=1, end_page=0):
     print(f'共找到 {len(image_links)} 张图片，耗时 {stop_time - start_time:.4f} 秒')
 
     domain_info = {
-        'domain': f'http://{domain}.lofter.com/',
+        'domain': f'https://{domain}.lofter.com/',
         'username': username,
         'page_range': [start_page, end_page],
-        'posts': post_infos
+        'posts': post_infos,
     }
 
     with json_file.open('w', encoding='utf-8') as f:
@@ -359,8 +353,7 @@ def gather_image_links(info, separate_folders=True):
                     image_links.append((image, post_dir / get_filename(image)))
             else:
                 for image in post['images']:
-                    image_links.append(
-                        (image, domain_dir / get_filename(image)))
+                    image_links.append((image, domain_dir / get_filename(image)))
     # 否则表明这是一个 post info
     else:
         if not info['images']:
